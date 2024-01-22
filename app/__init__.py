@@ -1,5 +1,6 @@
+from .log import ProgressLog
 import sys
-from PyQt5.QtWidgets import QApplication, QDialogButtonBox, QFormLayout, QLineEdit, QStyle, QWidget
+from PyQt5.QtWidgets import QApplication, QDialogButtonBox, QFormLayout, QLineEdit, QStyle, QTextEdit, QWidget
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -15,6 +16,10 @@ class MainWindow(QWidget):
         layout.addRow("API Key", api_key)
         layout.addRow("Account ID", QLineEdit())
         layout.addRow("Video URL", QLineEdit())
+        # Add output box
+        log_edit = ProgressLog()
+        log_edit.print("<Progress updates will go here>")
+        layout.addRow(log_edit)
         # Add submit/cancel buttons
         button_box = QDialogButtonBox()
         accept_btn = button_box.addButton("Send to Azure AI Video Indexer", QDialogButtonBox.ButtonRole.AcceptRole)
