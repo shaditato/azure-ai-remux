@@ -1,95 +1,124 @@
 import time
 import urllib.request
 import json
+from PyQt5.QtCore import QObject, pyqtSignal as Signal
 
-# CONSTANTS
-LOCATION = 'trial'
-VIDEO_NAME = f'azure-ai-pyqt-{time.time_ns()}'
-API_LINK = "api.videoindexer.ai"
 
-# USER INPUT
-ACCOUNT_ID = 'INSERT_ACCOUNT_ID'
-API_KEY = 'INSERT_API_KEY'
-VIDEO_URL = 'INSERT_VIDEO_URL'
+class AzureWorker(QObject):
+    progress = Signal(str)
+    completed = Signal(str)
+    error = Signal(str)
 
-# VARIABLES
-ACCESS_TOKEN = None
-VIDEO_ID = None
-VIDEO_ACCESS_TOKEN = None
+    def __init__(self, api_key, account_id, video_url):
+        super().__init__()
+        self.api_key = api_key
+        self.account_id = account_id
+        self.video_url = video_url
+        self.location = 'trial'
+        self.video_name = f'azure-ai-pyqt-{time.time_ns()}'
+        self.api_link = 'api.videoindexer.ai'
 
-########### GET ACCESS TOKEN USING ACCOUNT ID #############
-print("Retrieving Access Token...")
-try:
-    url = f"https://{API_LINK}/Auth/{LOCATION}/Accounts/{ACCOUNT_ID}/AccessToken?allowEdit=true"
+    def test(self):
+        self.log(f"API_KEY: {self.api_key}")
+        self.log(f"ACCOUNT_ID: {self.account_id}")
+        self.log(f"VIDEO_URL: {self.video_url}")
+        time.sleep(10)
+        self.exit()
 
-    hdr = {
-        'Cache-Control': 'no-cache',
-        'Ocp-Apim-Subscription-Key': API_KEY,
-    }
+    # Get access token using Account ID
+    def getAccessToken(self):
+        self.progress.emit("Retrieving Access Token...")
+        try:
+            url = f"https://{self.api_link}/Auth/{self.location}/Accounts/{self.account_id}/AccessToken?allowEdit=true"
 
-    req = urllib.request.Request(url, headers=hdr)
-    req.get_method = lambda: 'GET'
-    response = urllib.request.urlopen(req)
+            hdr = {
+                'Cache-Control': 'no-cache',
+                'Ocp-Apim-Subscription-Key': self.api_key,
+            }
 
-    print(f"[{response.getcode()}] Access Token Retrieved")
-    utf_str = response.read().decode('utf-8')
-    ACCESS_TOKEN = json.loads(utf_str)
-except Exception as e:
-    print(e)
+            req = urllib.request.Request(url, headers=hdr)
+            req.get_method = lambda: 'GET'
+            response = urllib.request.urlopen(req)
 
-########### UPLOAD VIDEO TO AZURE VIDEO INDEXER #############
-print("Uploading video to Azure...")
-try:
-    url = f"https://{API_LINK}/{LOCATION}/Accounts/{ACCOUNT_ID}/Videos?name={VIDEO_NAME}&videoUrl={VIDEO_URL}&accessToken={ACCESS_TOKEN}"
+            self.progress.emit(
+                f"[{response.getcode()}] Access Token Retrieved")
+            utf_str = response.read().decode('utf-8')
+            self.access_token = json.loads(utf_str)
+        except Exception as e:
+            self.error.emit(f"Access Token Retrieval Failed: {e}")
+            raise e
 
-    hdr = {
-        'Cache-Control': 'no-cache',
-    }
+    # Upload video to Azure Video Indexer
+    def uploadVideo(self):
+        self.progress.emit("Uploading video to Azure...")
+        try:
+            url = f"https://{self.api_link}/{self.location}/Accounts/{self.account_id}/Videos?name={self.video_name}&videoUrl={self.video_url}&accessToken={self.access_token}"
 
-    req = urllib.request.Request(url, headers=hdr)
-    req.get_method = lambda: 'POST'
-    response = urllib.request.urlopen(req)
+            hdr = {
+                'Cache-Control': 'no-cache',
+            }
 
-    print(f"[{response.getcode()}] Video uploaded")
+            req = urllib.request.Request(url, headers=hdr)
+            req.get_method = lambda: 'POST'
+            response = urllib.request.urlopen(req)
 
-    utf_str = response.read().decode('utf-8')
-    video_json = json.loads(utf_str)
-    VIDEO_ID = video_json["id"]
-except Exception as e:
-    print(e)
+            self.progress.emit(f"[{response.getcode()}] Video uploaded")
 
-########### GET VIDEO INDEX INFORMATION #############
-print("Retrieving video index...")
-try:
-    url = f"https://{API_LINK}/{LOCATION}/Accounts/{ACCOUNT_ID}/Videos/{VIDEO_ID}/Index?accessToken={ACCESS_TOKEN}"
+            utf_str = response.read().decode('utf-8')
+            video_json = json.loads(utf_str)
+            print(video_json)
+            self.video_id = video_json["id"]
+        except Exception as e:
+            self.error.emit(f"Video Upload to Azure Video Indexer Failed: {e}")
+            raise e
 
-    hdr = {
-        'Cache-Control': 'no-cache',
-    }
+    # Get video index information
+    def getVideoIndex(self):
+        self.progress.emit("Retrieving video index...")
+        try:
+            url = f"https://{self.api_link}/{self.location}/Accounts/{self.account_id}/Videos/{self.video_id}/Index?accessToken={self.access_token}"
 
-    index_json = None
+            hdr = {
+                'Cache-Control': 'no-cache',
+            }
 
-    while True:
-        req = urllib.request.Request(url, headers=hdr)
-        req.get_method = lambda: 'GET'
-        response = urllib.request.urlopen(req)
+            index_json = None
 
-        utf_str = response.read().decode('utf-8')
-        index_json = json.loads(utf_str)
+            # Check processing progress
+            while True:
+                req = urllib.request.Request(url, headers=hdr)
+                req.get_method = lambda: 'GET'
+                response = urllib.request.urlopen(req)
 
-        processing_state = index_json['state']
-        processing_progress = index_json['videos'][0]['processingProgress']
+                utf_str = response.read().decode('utf-8')
+                index_json = json.loads(utf_str)
 
-        if (processing_state not in ['Uploaded', 'Processing']):
-            print(f"[{response.getcode()}] Video index retrieved")
-            break
-        else:
-            print(f"[{processing_progress}] {processing_state}...")
-            time.sleep(10)
+                processing_state = index_json['state']
+                processing_progress = index_json['videos'][0]['processingProgress']
 
-    with open('index.json', 'w') as fp:
-        json.dump(index_json, fp)
-    print("Saved to index.json")
+                if (processing_state not in ['Uploaded', 'Processing']):
+                    self.progress.emit(
+                        f"[{response.getcode()}] Video index retrieved")
+                    break
+                else:
+                    self.progress.emit(
+                        f"[{processing_progress}] {processing_state}...")
+                    time.sleep(10)
 
-except Exception as e:
-    print(e)
+            with open('index.json', 'w') as fp:
+                json.dump(index_json, fp)
+            self.progress.emit("Saved to index.json")
+        except Exception as e:
+            self.error.emit(e)
+            raise e
+
+    def exec(self):
+        try:
+            self.progress.emit(
+                "=== Executing Azure Video Indexer Functions ===")
+            self.getAccessToken()
+            self.uploadVideo()
+            self.getVideoIndex()
+            self.completed.emit("Completed")
+        except Exception:
+            return
